@@ -3,7 +3,7 @@ import threading
 import time
 
 # Core Settings
-HOST = '192.168.2.105'
+HOST = '192.168.49.1'
 PORT = 5555
 MAX_PLAYERS = 4
 GRID_SIZE = 100
