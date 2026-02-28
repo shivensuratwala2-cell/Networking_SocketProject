@@ -2,7 +2,8 @@ import socket
 import threading
 import os
 SERVER_IP = '192.168.49.1' # Replace with actual IP
-PORT = 5555
+PORT = 5554
+MAX_PLAYERS = 3
 
 
 
@@ -36,61 +37,63 @@ def show_welcome_screen():
 
 
 
-def receive_messages(client_socket):
-    while True:
-        try:
-            message = client_socket.recv(2048).decode('utf-8')
-            if not message: break
-            print(message)
-        except:
-            print("\n[CONNECTION LOST]")
-            break
 
-def start_client():
-    show_welcome_screen()
-    
-    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+# Game State
+players = [] # List of {"conn": conn, "name": name, "pos": [x,y]}
+current_turn = 0
+
+def broadcast(msg):
+    for p in players:
+        try:
+            p["conn"].send(msg.encode('utf-8'))
+        except: pass
+
+def handle_client(conn, index):
+    global current_turn
     try:
-        client.connect((SERVER_IP, PORT))
-    except Exception as e:
-        print(f"Error: Could not connect to {SERVER_IP}. {e}")
-        return
+        conn.send("WELCOME TO ESCAPE ROOM! Enter Name: ".encode('utf-8'))
+        name = conn.recv(1024).decode('utf-8').strip()
+        
+        # Store human player data
+        players.append({"conn": conn, "name": name, "pos": [index*5, index*5]})
+        broadcast(f"\nSYSTEM: {name} joined the game!")
 
-    # Start thread to receive live feedback while user types
-    threading.Thread(target=receive_messages, args=(client,), daemon=True).start()
+        # Wait until all 4 members join before starting turn logic
+        while len(players) < MAX_PLAYERS:
+            pass
 
-    while True:
-        user_input = input()
-        client.send(user_input.encode('utf-8'))
+        while True:
+            msg = conn.recv(1024).decode('utf-8').strip().lower()
+            
+            if current_turn == index:
+                if msg in ['w', 'a', 's', 'd']:
+                    # Update Position Logic
+                    p_pos = players[index]["pos"]
+                    if msg == 'w': p_pos[1] -= 1
+                    if msg == 's': p_pos[1] += 1
+                    if msg == 'a': p_pos[0] -= 1
+                    if msg == 'd': p_pos[0] += 1
+                    
+                    # Switch Turn
+                    current_turn = (current_turn + 1) % MAX_PLAYERS
+                    broadcast(f"\n{name} moved to {p_pos}")
+                    players[current_turn]["conn"].send("\n*** YOUR TURN! ***\n".encode('utf-8'))
+                elif msg.startswith("chat:"):
+                    broadcast(f"CHAT [{name}]: {msg[5:]}")
+            else:
+                conn.send("WAIT: It is not your turn!\n".encode('utf-8'))
+    except: pass
 
-if __name__ == "__main__":
-    start_client()
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.bind((HOST, PORT))
+server.listen(MAX_PLAYERS)
+print("Server Ready. Waiting for 4 group members...")
 
-client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect((SERVER_IP, PORT))
+conn_idx = 0
+while conn_idx < MAX_PLAYERS:
+    c, addr = server.accept()
+    threading.Thread(target=handle_client, args=(c, conn_idx)).start()
+    conn_idx += 1
 
-def receive():
-    while True:
-        try:
-            print(client.recv(2048).decode('utf-8'))
-        except: break
-
-threading.Thread(target=receive, daemon=True).start()
-
-while True:
-    cmd = input()
-    client.send(cmd.encode('utf-8'))
-# ... (Keep the show_welcome_screen from previous step)
-
-def receive_thread(client_socket):
-    while True:
-        try:
-            # Receive layout, turn notifications, and chat
-            data = client_socket.recv(4096).decode('utf-8')
-            if data:
-                # Use a simple clear screen to keep the UI clean
-                print("\033[H\033[J", end="") 
-                print(data)
-        except:
-            break
 
